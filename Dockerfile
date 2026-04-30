@@ -1,7 +1,6 @@
 FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 RUN apt-get update && apt-get install -y \
     git curl wget ffmpeg libgl1 libglib2.0-0 \
@@ -14,22 +13,27 @@ WORKDIR /ComfyUI
 
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir runpod requests websocket-client pillow huggingface_hub hf_transfer
+RUN pip install --no-cache-dir runpod requests websocket-client pillow
 
-# 🔥 DOWNLOAD MODEL DURING BUILD (IMPORTANT)
-RUN mkdir -p models/text_encoders models/diffusion_models models/vae
+# ✅ create model folders
+RUN mkdir -p models/text_encoders models/diffusion_models models/vae models/loras
 
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/text_encoders/qwen_3_4b.safetensors \
-    --local-dir models/text_encoders
+# 🔥 DIRECT DOWNLOAD (NO huggingface-cli)
+RUN wget -q --show-progress -O models/text_encoders/qwen_3_4b.safetensors \
+https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors
 
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/diffusion_models/z_image_turbo_bf16.safetensors \
-    --local-dir models/diffusion_models
+RUN wget -q --show-progress -O models/diffusion_models/z_image_turbo_bf16.safetensors \
+https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors
 
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/vae/ae.safetensors \
-    --local-dir models/vae
+RUN wget -q --show-progress -O models/vae/ae.safetensors \
+https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors
+
+# optional (faster / alt versions)
+RUN wget -q --show-progress -O models/diffusion_models/z_image_turbo_nvfp4.safetensors \
+https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
+
+RUN wget -q --show-progress -O models/loras/z_image_turbo_distill_patch_lora_bf16.safetensors \
+https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/loras/z_image_turbo_distill_patch_lora_bf16.safetensors
 
 COPY handler.py /handler.py
 COPY start.sh /start.sh
