@@ -1,28 +1,25 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV COMFYUI_PATH=/ComfyUI
+ENV COMFYUI_PORT=8188
 
-RUN apt-get update && apt-get install -y \
-    git python3 python3-pip ffmpeg libgl1 libglib2.0-0 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget ffmpeg libgl1 libglib2.0-0 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 
-# clone ComfyUI
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
 
 WORKDIR /ComfyUI
 
-# install minimal deps
-COPY requirements.txt .
-RUN pip3 install --upgrade pip
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir runpod requests websocket-client pillow huggingface_hub hf_transfer
 
-# install ComfyUI core only
-RUN pip3 install --no-cache-dir -r requirements.txt || true
-
-# copy app
 COPY handler.py /handler.py
 COPY start.sh /start.sh
 COPY workflows /workflows
