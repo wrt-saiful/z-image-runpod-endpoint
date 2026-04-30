@@ -1,4 +1,10 @@
-runpod
-requests
-websocket-client
+torch
+torchvision
+torchaudio
+transformers
+safetensors
 pillow
+requests
+runpod
+websocket-client
+huggingface_hub

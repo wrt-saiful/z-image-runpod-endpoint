@@ -4,40 +4,25 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 RUN apt-get update && apt-get install -y \
-    git wget curl python3 python3-pip python3-venv ffmpeg libgl1 libglib2.0-0 \
+    git python3 python3-pip ffmpeg libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /
 
+# clone ComfyUI
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
 
 WORKDIR /ComfyUI
 
+# install minimal deps
+COPY requirements.txt .
 RUN pip3 install --upgrade pip
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-RUN pip3 install -r requirements.txt
-RUN pip3 install runpod requests websocket-client pillow huggingface_hub[hf_transfer]
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Download Z-Image Turbo models
-RUN mkdir -p models/text_encoders models/diffusion_models models/vae
+# install ComfyUI core only
+RUN pip3 install --no-cache-dir -r requirements.txt || true
 
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/text_encoders/qwen_3_4b.safetensors \
-    --local-dir /ComfyUI/models --local-dir-use-symlinks False
-
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/diffusion_models/z_image_turbo_bf16.safetensors \
-    --local-dir /ComfyUI/models --local-dir-use-symlinks False
-
-RUN huggingface-cli download Comfy-Org/z_image_turbo \
-    split_files/vae/ae.safetensors \
-    --local-dir /ComfyUI/models --local-dir-use-symlinks False
-
-RUN mv /ComfyUI/models/split_files/text_encoders/* /ComfyUI/models/text_encoders/ && \
-    mv /ComfyUI/models/split_files/diffusion_models/* /ComfyUI/models/diffusion_models/ && \
-    mv /ComfyUI/models/split_files/vae/* /ComfyUI/models/vae/ && \
-    rm -rf /ComfyUI/models/split_files
-
+# copy app
 COPY handler.py /handler.py
 COPY start.sh /start.sh
 COPY workflows /workflows
