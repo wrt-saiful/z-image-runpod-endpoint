@@ -1,8 +1,6 @@
 """
 RunPod Serverless handler for Z-Image Turbo via ComfyUI API.
-
-This handler starts ComfyUI in the background and sends workflow requests to it.
-ComfyUI handles all the model loading and inference - we just wrap it with RunPod's API.
+Downloads models on first run to network volume at /runpod-volume
 """
 
 import os
@@ -19,10 +17,80 @@ import uuid
 
 import runpod
 
-# ComfyUI settings
+# Paths
 COMFY_DIR = "/app/ComfyUI"
+VOLUME_DIR = "/runpod-volume"
 COMFY_PORT = 8188
 COMFY_URL = f"http://127.0.0.1:{COMFY_PORT}"
+
+# Model paths - use network volume if available, fallback to local
+if os.path.exists(VOLUME_DIR):
+    MODELS_BASE = f"{VOLUME_DIR}/models"
+else:
+    MODELS_BASE = f"{COMFY_DIR}/models"
+
+CHECKPOINT_DIR = f"{MODELS_BASE}/checkpoints"
+CLIP_DIR = f"{MODELS_BASE}/clip"
+VAE_DIR = f"{MODELS_BASE}/vae"
+
+# Create symlinks from ComfyUI to network volume
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+os.makedirs(CLIP_DIR, exist_ok=True)
+os.makedirs(VAE_DIR, exist_ok=True)
+
+# Symlink network volume to ComfyUI directories
+if os.path.exists(VOLUME_DIR):
+    for src, dst in [
+        (CHECKPOINT_DIR, f"{COMFY_DIR}/models/checkpoints"),
+        (CLIP_DIR, f"{COMFY_DIR}/models/clip"),
+        (VAE_DIR, f"{COMFY_DIR}/models/vae"),
+    ]:
+        if not os.path.islink(dst):
+            os.system(f"rm -rf {dst}")
+            os.symlink(src, dst)
+            print(f"[init] Linked {dst} -> {src}")
+
+
+def download_model_files():
+    """Download Z-Image Turbo model files if not present."""
+    
+    files_to_check = [
+        (f"{CHECKPOINT_DIR}/z_image_turbo.safetensors", 
+         "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo.safetensors",
+         "checkpoint"),
+        (f"{CLIP_DIR}/clip_l.safetensors",
+         "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/clip_l.safetensors",
+         "CLIP text encoder"),
+        (f"{VAE_DIR}/ae.safetensors",
+         "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
+         "VAE"),
+    ]
+    
+    for filepath, url, name in files_to_check:
+        if os.path.exists(filepath):
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            print(f"[init] ✓ {name} already exists ({size_mb:.1f} MB)")
+            continue
+            
+        print(f"[init] Downloading {name} from HuggingFace...")
+        print(f"[init] URL: {url}")
+        print(f"[init] This may take 5-10 minutes depending on your connection...")
+        
+        # Download with progress
+        result = os.system(f"wget --progress=bar:force:noscroll -O '{filepath}' '{url}'")
+        
+        if result != 0:
+            raise RuntimeError(f"Failed to download {name} (exit code {result})")
+        
+        size_mb = os.path.getsize(filepath) / (1024 * 1024)
+        print(f"[init] ✓ Downloaded {name} ({size_mb:.1f} MB)")
+    
+    print("[init] All model files ready!")
+
+
+# Download models on startup
+print("[init] Checking model files...")
+download_model_files()
 
 # Start ComfyUI server in background
 print("[init] Starting ComfyUI server...")
@@ -35,7 +103,7 @@ comfy_process = subprocess.Popen(
 
 # Wait for ComfyUI to be ready
 print("[init] Waiting for ComfyUI to start...")
-max_wait = 60
+max_wait = 120  # Increased for first-time model loading
 start_time = time.time()
 while time.time() - start_time < max_wait:
     try:
@@ -46,7 +114,7 @@ while time.time() - start_time < max_wait:
     except:
         time.sleep(2)
 else:
-    raise RuntimeError("ComfyUI failed to start within 60 seconds")
+    raise RuntimeError("ComfyUI failed to start within 120 seconds")
 
 # Load base workflow template
 with open("/app/workflow_api.json", "r") as f:
@@ -62,14 +130,9 @@ def generate_image(
     cfg: float = 3.5,
     seed: int = None,
 ) -> bytes:
-    """
-    Generate an image using ComfyUI's API.
-    Returns the image as PNG bytes.
-    """
-    # Create a copy of the workflow and customize it
+    """Generate an image using ComfyUI's API."""
     workflow = json.loads(json.dumps(BASE_WORKFLOW))
     
-    # Update parameters
     workflow["3"]["inputs"]["seed"] = seed if seed is not None else int(time.time())
     workflow["3"]["inputs"]["steps"] = steps
     workflow["3"]["inputs"]["cfg"] = cfg
@@ -78,10 +141,8 @@ def generate_image(
     workflow["6"]["inputs"]["text"] = prompt
     workflow["7"]["inputs"]["text"] = negative_prompt
     
-    # Generate unique client_id for this request
     client_id = str(uuid.uuid4())
     
-    # Queue the prompt
     response = requests.post(
         f"{COMFY_URL}/prompt",
         json={"prompt": workflow, "client_id": client_id},
@@ -99,17 +160,14 @@ def generate_image(
         history = history_resp.json()
         
         if prompt_id in history:
-            # Check if completed
             outputs = history[prompt_id].get("outputs", {})
             if outputs:
-                # Find the SaveImage node output (node "9" in our workflow)
                 for node_id, node_output in outputs.items():
                     if "images" in node_output:
                         image_info = node_output["images"][0]
                         filename = image_info["filename"]
                         subfolder = image_info.get("subfolder", "")
                         
-                        # Download the image
                         params = {
                             "filename": filename,
                             "subfolder": subfolder,
@@ -122,7 +180,6 @@ def generate_image(
                         )
                         return img_response.content
                         
-            # Check for errors
             status = history[prompt_id].get("status", {})
             if status.get("status_str") == "error":
                 error_details = status.get("messages", [])
@@ -136,24 +193,8 @@ def image_to_base64(img_bytes: bytes) -> str:
     return base64.b64encode(img_bytes).decode("utf-8")
 
 
-# ---- Handler ---------------------------------------------------------------
-
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Expected input shape:
-    {
-      "input": {
-        "prompt": "a cinematic photo of a fox in a forest",
-        "negative_prompt": "blurry, low quality",   // optional
-        "width": 1024,                               // optional, default 1024
-        "height": 1024,                              // optional, default 1024
-        "num_inference_steps": 8,                    // turbo => few steps
-        "guidance_scale": 3.5,                       // optional, CFG
-        "seed": 42,                                  // optional, random if absent
-        "num_images": 1                              // optional, default 1
-      }
-    }
-    """
+    """RunPod handler - same API as before."""
     try:
         job_input = event.get("input", {}) or {}
 
@@ -169,10 +210,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         seed = job_input.get("seed")
         num_images = int(job_input.get("num_images", 1))
 
-        # Generate images
         b64_images = []
         for i in range(num_images):
-            # Use different seeds for multiple images
             current_seed = seed + i if seed is not None else None
             
             img_bytes = generate_image(
@@ -207,8 +246,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             "traceback": traceback.format_exc(),
         }
 
-
-# ---- RunPod entrypoint -----------------------------------------------------
 
 if __name__ == "__main__":
     runpod.serverless.start({"handler": handler})
