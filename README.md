@@ -12,14 +12,40 @@ Direct `diffusers`-based deployment, returns base64 PNGs. Targets 48GB GPUs (A60
 | `test_input.json` | Sample input for local testing |
 | `client_example.py` | Example HTTP client for the deployed endpoint |
 
-## Important: Z-Image diffusers support
+## Model Loading Strategy
 
-Z-Image is new. The `Dockerfile` installs `diffusers` from GitHub `main` to get the latest support. The handler tries `ZImagePipeline` first, then falls back to the auto-detecting `DiffusionPipeline`. If neither works at build time, you have two options:
+This setup downloads model files **directly from Comfy-Org/z_image_turbo** via wget in the Dockerfile:
 
-1. Check the [Tongyi-MAI/Z-Image GitHub](https://github.com/Tongyi-MAI) repo for a custom pipeline class name and update the import in `handler.py`.
-2. Switch to the ComfyUI worker route (the model ships in ComfyUI format natively in `Comfy-Org/z_image_turbo`).
+- **Diffusion model**: `split_files/diffusion_models/z_image_turbo.safetensors` (~8GB)
+- **Text encoder**: `split_files/text_encoders/clip_l.safetensors` (~500MB)
+- **VAE**: `split_files/vae/ae.safetensors` (~300MB)
+- **Config files**: `model_index.json`, `README.md`, etc.
 
-Also: `Comfy-Org/z_image_turbo` (the repo you linked) is the ComfyUI-formatted version. For diffusers, `Tongyi-MAI/Z-Image-Turbo` (the original) is what `from_pretrained` expects. If only the Comfy-Org one exists for your needs, you'd convert weights — easier to just use ComfyUI.
+All files are baked into `/models/z-image-turbo/` at build time — **no network volume needed, no cold-start downloads**.
+
+### Two Handler Options
+
+**`handler.py`** (recommended first try):
+- Attempts to load via `DiffusionPipeline.from_pretrained()` auto-detection
+- Falls back to `ZImagePipeline` if available in your diffusers version
+- Simplest approach if diffusers recognizes the model structure
+
+**`handler_comfy_format.py`** (ComfyUI checkpoint loader):
+- Loads individual safetensors files using `from_single_file()`
+- Manually assembles UNet, VAE, text encoder, scheduler into a pipeline
+- More robust for ComfyUI-native checkpoint formats
+- Use this if `handler.py` fails with "unrecognized model format"
+
+To switch handlers, change the Dockerfile's last line from:
+```dockerfile
+COPY handler.py .
+CMD ["python", "-u", "handler.py"]
+```
+to:
+```dockerfile
+COPY handler_comfy_format.py handler.py
+CMD ["python", "-u", "handler.py"]
+```
 
 ## Build & push
 

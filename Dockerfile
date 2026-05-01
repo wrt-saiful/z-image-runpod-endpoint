@@ -28,15 +28,14 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt && \
     pip install hf_transfer
 
-# ---- Bake the model into the image (recommended) -----------------------
-# This avoids a multi-GB download on every cold start. Comment this block
-# out if you'd rather use a network volume and download on first run.
-ARG MODEL_ID=Tongyi-MAI/Z-Image-Turbo
-ENV MODEL_ID=${MODEL_ID}
-RUN python -c "from huggingface_hub import snapshot_download; \
-    snapshot_download(repo_id='${MODEL_ID}', \
-                      local_dir='/models/z-image-turbo', \
-                      local_dir_use_symlinks=False)"
+# ---- Bake ALL model components into the image --------------------------
+# Downloads all required files from Comfy-Org/z_image_turbo repo using script.
+
+COPY download_models.sh /tmp/
+RUN chmod +x /tmp/download_models.sh && \
+    MODEL_DIR=/models/z-image-turbo /tmp/download_models.sh && \
+    rm /tmp/download_models.sh
+
 ENV MODEL_ID=/models/z-image-turbo
 # ------------------------------------------------------------------------
 
