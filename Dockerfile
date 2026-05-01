@@ -1,45 +1,45 @@
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+# CUDA 12.1 + Python 3.10 base — known good with current torch wheels.
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/huggingface \
+    TRANSFORMERS_CACHE=/runpod-volume/huggingface \
+    HF_HUB_ENABLE_HF_TRANSFER=1
 
-RUN apt-get update && apt-get install -y \
-    git curl wget ffmpeg libgl1 libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.10 python3-pip python3.10-venv \
+    git wget curl ca-certificates \
+    libgl1 libglib2.0-0 \
+ && ln -sf /usr/bin/python3.10 /usr/bin/python \
+ && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
+ && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /
+# Torch matched to CUDA 12.1
+RUN pip install --upgrade pip && \
+    pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu121
 
-RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git /ComfyUI
-WORKDIR /ComfyUI
+WORKDIR /app
 
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir runpod requests websocket-client pillow
+# Python deps
+COPY requirements.txt .
+RUN pip install -r requirements.txt && \
+    pip install hf_transfer
 
-# ✅ create model folders
-RUN mkdir -p models/text_encoders models/diffusion_models models/vae models/loras
+# ---- Bake the model into the image (recommended) -----------------------
+# This avoids a multi-GB download on every cold start. Comment this block
+# out if you'd rather use a network volume and download on first run.
+ARG MODEL_ID=Tongyi-MAI/Z-Image-Turbo
+ENV MODEL_ID=${MODEL_ID}
+RUN python -c "from huggingface_hub import snapshot_download; \
+    snapshot_download(repo_id='${MODEL_ID}', \
+                      local_dir='/models/z-image-turbo', \
+                      local_dir_use_symlinks=False)"
+ENV MODEL_ID=/models/z-image-turbo
+# ------------------------------------------------------------------------
 
-# 🔥 DIRECT DOWNLOAD (NO huggingface-cli)
-RUN wget -q --show-progress -O models/text_encoders/qwen_3_4b.safetensors \
-https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors
+COPY handler.py .
 
-RUN wget -q --show-progress -O models/diffusion_models/z_image_turbo_bf16.safetensors \
-https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors
-
-RUN wget -q --show-progress -O models/vae/ae.safetensors \
-https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors
-
-# optional (faster / alt versions)
-RUN wget -q --show-progress -O models/diffusion_models/z_image_turbo_nvfp4.safetensors \
-https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_nvfp4.safetensors
-
-RUN wget -q --show-progress -O models/loras/z_image_turbo_distill_patch_lora_bf16.safetensors \
-https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/loras/z_image_turbo_distill_patch_lora_bf16.safetensors
-
-COPY handler.py /handler.py
-COPY start.sh /start.sh
-COPY workflows /workflows
-
-RUN chmod +x /start.sh
-
-EXPOSE 8188
-CMD ["/start.sh"]
+CMD ["python", "-u", "handler.py"]

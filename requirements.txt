@@ -1,10 +1,10 @@
-torch
-torchvision
-torchaudio
-transformers
-safetensors
-pillow
-requests
-runpod
-websocket-client
-huggingface_hub
+runpod>=1.7.0
+# Install diffusers from source — Z-Image support is recent.
+# If a tagged release supports ZImagePipeline by the time you build, pin it instead.
+git+https://github.com/huggingface/diffusers.git
+transformers>=4.45.0
+accelerate>=0.34.0
+safetensors>=0.4.5
+sentencepiece>=0.2.0
+pillow>=10.0.0
+huggingface_hub>=0.25.0
