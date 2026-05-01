@@ -29,12 +29,25 @@ RUN pip install -r requirements.txt && \
     pip install hf_transfer
 
 # ---- Bake ALL model components into the image --------------------------
-# Downloads all required files from Comfy-Org/z_image_turbo repo using script.
+# Use HuggingFace Hub to download the complete repo (most reliable method)
 
-COPY download_models.sh /tmp/
-RUN chmod +x /tmp/download_models.sh && \
-    MODEL_DIR=/models/z-image-turbo /tmp/download_models.sh && \
-    rm /tmp/download_models.sh
+# First, ensure wget is available as backup
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
+# Download using huggingface_hub (handles LFS and repo structure properly)
+RUN echo "=== Starting model download ===" && \
+    python -c "from huggingface_hub import snapshot_download; \
+    print('Downloading Comfy-Org/z_image_turbo...'); \
+    snapshot_download( \
+        repo_id='Comfy-Org/z_image_turbo', \
+        local_dir='/models/z-image-turbo', \
+        local_dir_use_symlinks=False, \
+        resume_download=True \
+    ); \
+    print('Download complete!')" && \
+    echo "=== Model downloaded successfully ===" && \
+    ls -lah /models/z-image-turbo && \
+    du -sh /models/z-image-turbo
 
 ENV MODEL_ID=/models/z-image-turbo
 # ------------------------------------------------------------------------

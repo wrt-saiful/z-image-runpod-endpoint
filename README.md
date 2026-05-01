@@ -49,19 +49,44 @@ CMD ["python", "-u", "handler.py"]
 
 ## Build & push
 
+**Option 1: Full build with baked-in models (recommended for production)**
 ```bash
-# 1. Build (this will download ~15-20GB of model weights into the image)
+# This downloads ~9GB during build - takes 15-30 minutes depending on connection
 docker build -t YOUR_DOCKERHUB_USER/z-image-turbo:v1 .
 
-# 2. Push to a registry RunPod can pull from
+# Push to registry
 docker push YOUR_DOCKERHUB_USER/z-image-turbo:v1
 ```
 
-If the image gets too big, switch to using a **RunPod network volume** instead of baking the model in:
+**Option 2: Lightweight build for testing (uses network volume)**
+```bash
+# Faster build, models download on first cold start
+docker build -f Dockerfile.lightweight -t YOUR_DOCKERHUB_USER/z-image-turbo:lite .
+docker push YOUR_DOCKERHUB_USER/z-image-turbo:lite
+```
 
-1. Create a network volume in the RunPod console.
-2. Comment out the `RUN python -c "...snapshot_download..."` block in `Dockerfile`.
-3. Set `MODEL_ID=Tongyi-MAI/Z-Image-Turbo` as an env var on the endpoint — first cold start will download to `/runpod-volume/huggingface` and subsequent starts will reuse it.
+### Build troubleshooting
+
+**If build fails with "exit code: 1" during model download:**
+
+1. **Check your internet connection** - The build downloads ~9GB from HuggingFace
+2. **HuggingFace rate limiting** - If you're hitting rate limits, wait 10 minutes and retry
+3. **Use the lightweight build** - Build without models baked in:
+   ```bash
+   docker build -f Dockerfile.lightweight -t YOUR_IMAGE .
+   ```
+   Then attach a RunPod network volume at `/runpod-volume` - models download on first run.
+
+4. **Manual download test** - Test the download locally first:
+   ```bash
+   pip install huggingface_hub hf_transfer
+   python -c "from huggingface_hub import snapshot_download; \
+       snapshot_download('Comfy-Org/z_image_turbo', local_dir='./test-download')"
+   ```
+
+**If repo is private or gated:**
+- Add `--build-arg HF_TOKEN=hf_xxx` to docker build
+- Or set `HF_TOKEN` env var in the Dockerfile
 
 ## Deploy on RunPod
 
