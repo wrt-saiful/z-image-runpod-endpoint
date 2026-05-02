@@ -1,0 +1,6 @@
+# Python dependencies for local development and testing
+
+runpod>=1.7.0
+requests>=2.31.0
+pillow>=10.0.0
+boto3>=1.28.0

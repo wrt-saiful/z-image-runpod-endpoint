@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  z-image-turbo:
+    build: .
+    image: z-image-turbo:local
+    container_name: z-image-turbo-dev
+    environment:
+      - RUNPOD_API_KEY=${RUNPOD_API_KEY}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      # Mount local directory for development
+      - ./src:/ComfyUI/src:ro
+      - ./workflows:/ComfyUI/workflows:ro
+      # Mount volume for models (persistent)
+      - models_volume:/runpod-volume
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: python -u handler.py
+
+volumes:
+  models_volume:
+    driver: local
